@@ -1,12 +1,16 @@
 # Workflow Example
 
-A full end-to-end walkthrough of one feature using the agent team. This is not abstract —
-every prompt is what you would actually type, and every agent response is representative of
-what you would get back.
+A full end-to-end walkthrough of one feature using the agent team. Every prompt is what you
+would actually type; every agent response is representative of what you get back.
 
-**The scenario:** You are adding a protected `/api/status` endpoint to a Node.js/Express web
-project. The endpoint returns server health data and must require an API key. The repo lives
-at `~/Projects/myapp`, main branch, and there is no auth anywhere yet.
+**The scenario:** You are adding Stripe webhook handling to a PHP project. When Stripe sends
+a `payment_intent.succeeded` event, you need to record the payment in MySQL and mark the
+associated order as paid. The repo lives at `~/Projects/myapp`, main branch. Stripe is already
+used for checkout — this is the first webhook endpoint.
+
+**Stack:** PHP, MySQL, HTML/CSS/JS, Stripe  
+**Deploy:** SSH into server → `git pull`  
+**Servers:** development (104.237.131.5), projects (173.255.195.153)
 
 ---
 
@@ -16,64 +20,73 @@ You have a goal. You do not have a plan. Start here every time.
 
 **What you type:**
 ```
-Use tech-lead. Goal: add a protected /api/status endpoint to the Express app that returns
-server health (uptime, memory, version) and requires a valid API key in the Authorization
-header. Repo: ~/Projects/myapp, main branch. What exists: Express app running, no auth
-anywhere, no /api routes yet. I want the breakdown.
+Use tech-lead. Goal: add a Stripe webhook endpoint that listens for payment_intent.succeeded
+events, verifies the Stripe signature, records the payment in MySQL, and marks the order as
+paid. Repo: ~/Projects/myapp, main branch. What exists: Stripe checkout already works
+(stripe-php library installed), orders table in MySQL has a status column, no webhook
+handling anywhere. I want the breakdown.
 ```
 
 **What you get back:**
 ```
-GOAL: Add a protected /api/status endpoint so operators can programmatically check server
-health without exposing it to the public.
+GOAL: Handle Stripe payment confirmations server-side so orders are reliably marked paid
+even if the user closes the browser before the success page loads.
 
-RISKIEST ASSUMPTION: The API key validation approach — hardcoded key vs env var vs database
-lookup — determines the data model and test surface. Task 1 resolves this by building the
-thinnest working version (env var) so the shape is proven before any complexity is added.
+RISKIEST ASSUMPTION: Stripe signature verification — if the webhook secret is wrong or the
+raw request body is consumed before verification, every webhook silently fails or (worse)
+accepts forged events. Task 1 proves verification works before any database writes happen.
 
 TASKS (ordered):
 
-  1. Wire the route and auth middleware (env-var key, no database)
-     Scope: create routes/api.js, add GET /api/status returning JSON, write middleware that
-     reads Authorization header and compares to API_KEY env var, reject with 401 if missing
-     or wrong, mount the router in app.js
-     DoD: curl with correct key returns 200 + JSON payload; curl without key returns 401;
-          curl with wrong key returns 401; one integration test covers all three cases
-     Gate: code-reviewer; security-reviewer (auth + input handling)
-     First step: create routes/api.js with a stub GET /api/status that returns {ok: true},
-                 mount it in app.js, confirm the route answers before touching auth
+  1. Wire the endpoint and verify the Stripe signature
+     Scope: create webhooks/stripe.php, read the raw POST body, verify using
+     \Stripe\Webhook::constructEvent() with STRIPE_WEBHOOK_SECRET from env, return 400
+     on failure, return 200 on success (no DB write yet), register the route in your
+     router or .htaccess, configure the endpoint in the Stripe dashboard
+     DoD: Stripe CLI sends a test payment_intent.succeeded event and the endpoint returns
+          200; sending a request with a wrong signature returns 400; the raw body is never
+          decoded before verification
+     Gate: code-reviewer; security-reviewer (input handling + external webhook)
+     First step: create webhooks/stripe.php that reads php://input, calls constructEvent(),
+                 and returns 200/400 — no database, no business logic yet
 
-  2. Add health payload (uptime, memory, version)
-     Scope: populate the response body using process.uptime(), process.memoryUsage(),
-     and the version field from package.json; no external calls
-     DoD: response includes uptime (seconds), heapUsed (bytes), rss (bytes), version (string);
-          values change between calls (uptime increases); test asserts shape, not exact values
-     Gate: code-reviewer
-
-  3. Document and harden
-     Scope: add API_KEY to .env.example with a comment, add the endpoint to README under
-     "API", confirm the key is never logged (grep the codebase)
-     DoD: a teammate could set this up from the README alone; no key appears in any log output
+  2. Record the payment and mark the order paid
+     Scope: on verified payment_intent.succeeded, extract the payment intent ID and amount,
+     INSERT into a payments table (payment_intent_id, amount, status, created_at), UPDATE
+     orders SET status='paid' WHERE stripe_payment_intent_id = the intent ID; wrap both
+     writes in a transaction so they succeed or fail together
+     DoD: a test webhook event creates a payments row and updates the order row atomically;
+          sending the same event twice does not create a duplicate payment row (idempotency
+          via UNIQUE KEY on payment_intent_id); order status confirmed as 'paid' after event
      Gate: code-reviewer; security-reviewer
 
-OUT OF SCOPE: key rotation, multiple keys, rate limiting, response caching, metrics history
+  3. Harden and deploy
+     Scope: add STRIPE_WEBHOOK_SECRET to .env.example with instructions, add error logging
+     (failed verifications, DB errors), test with Stripe CLI against the dev server, deploy
+     to projects server via git pull, re-run Stripe CLI test against live endpoint
+     DoD: endpoint live on projects server and returning 200 for test events; failed
+          verifications logged but not exposed to caller; deployment steps documented
+     Gate: code-reviewer
 
-PARKED: per-key permissions, admin dashboard showing health trends
+OUT OF SCOPE: refund handling, other event types, webhook retry logic, admin UI
 
-RE-PLAN AT: after task 2 is done and merged
+PARKED: customer.subscription.* events for future subscription support
+
+RE-PLAN AT: after task 2 is merged
 ```
 
-**What you do:** Start task 1. Create a branch: `git checkout -b api-status-auth`.
-Write the route stub first — confirm the endpoint answers before touching auth.
-One task in flight. The other tasks wait.
+**What you do:** Start task 1. Create branch: `git checkout -b stripe-webhooks`.
+Create `webhooks/stripe.php` — just the signature verification, no database yet. Confirm it
+answers before writing any business logic.
 
 ---
 
 ## Step 2 — BUILD: you write every line
 
-You create `routes/api.js`, write the middleware, add the test. Midway through, you hit a
-question: should the middleware live in the route file or in a separate `middleware/` folder?
-This is exactly when you call senior-dev-mentor.
+You create `webhooks/stripe.php`, wire the route, and get the endpoint answering. Then you
+hit a design question: the database writes need to be in a transaction, but your current DB
+helper does not support transactions. Do you add transaction support to the helper or do
+you use PDO directly in the webhook file?
 
 ---
 
@@ -81,164 +94,195 @@ This is exactly when you call senior-dev-mentor.
 
 **What you type:**
 ```
-Use senior-dev-mentor. I am on task 1 of the api-status plan: building the auth middleware
-for GET /api/status in ~/Projects/myapp. I have the route working (stub returns 200). Now
-I need to put the API key middleware somewhere. I see two options:
+Use senior-dev-mentor. I am on task 2 of the Stripe webhook plan in ~/Projects/myapp:
+recording the payment and marking the order paid. The two DB writes need to be atomic.
+My current DB helper (lib/db.php) wraps PDO but has no transaction support — it just
+runs single queries. I see two options:
 
-  A. Define the middleware inline in routes/api.js — simple, co-located with the route
-  B. Put it in middleware/requireApiKey.js — reusable if we add more protected routes later
+  A. Use PDO directly in webhooks/stripe.php for this transaction (bypass the helper)
+  B. Add beginTransaction/commit/rollback methods to lib/db.php, then use it here
 
-Today there is only one protected route. What are the tradeoffs and what would you do?
+The helper is used in about 8 other files. What are the tradeoffs and what would you do?
 ```
 
 **What you get back:**
 ```
 OPTIONS:
 
-  A. Inline in routes/api.js
-     + Zero setup cost; the reader sees the whole route in one file
-     - If a second protected route appears, you copy-paste the check; now there are two
-       places to update when the key format changes
-     Risk: low today, grows linearly with the number of protected routes
+  A. PDO directly in webhooks/stripe.php
+     + Zero change to shared code; risk is contained to this file
+     + Faster to write right now
+     - You now have two patterns in the codebase: the helper and raw PDO; whoever reads
+       this file next will wonder why it is different
+     - If you need transactions elsewhere (you probably will), this pattern gets copied
 
-  B. middleware/requireApiKey.js
-     + One definition; every protected route imports it; changes propagate everywhere
-     + Testable in isolation — you can unit-test the middleware without spinning up the router
-     - One extra file for a function that is currently used once
-     Risk: premature if the second protected route never comes; not premature if it does
+  B. Add transaction support to lib/db.php
+     + One pattern throughout the codebase
+     + Any future code that needs transactions uses the same interface
+     - Touches shared code that 8 files depend on; requires testing those files still work
+     Risk: low — beginTransaction/commit/rollback are pass-through wrappers on PDO;
+           you are not changing query behavior
 
-RECOMMENDATION: B — separate middleware file.
+RECOMMENDATION: B — add to the helper.
 
-The deciding factor is testability, not reuse. A middleware function that reads a header and
-compares it to an env var has its own failure modes (missing header, wrong format, env var
-not set). Those are easier to cover in a focused unit test than through the full route.
-The file cost is one import line; the test cost savings are real.
+The deciding factor is that transactions are not a webhook-specific need. You will want them
+again (order creation, user registration with a related record, anything with two writes).
+Adding to the helper now costs 10 lines; adding it after copy-paste has spread costs a
+refactor. The risk to the 8 existing files is minimal — they do not call transaction methods
+that do not exist yet.
 
 Shape:
-  middleware/requireApiKey.js exports a single Express middleware function.
-  routes/api.js imports it: router.use(requireApiKey) before the status handler.
-  Test file: tests/middleware/requireApiKey.test.js — three cases (valid, missing, wrong).
+  lib/db.php: add beginTransaction(), commit(), rollback() — each calls the PDO equivalent.
+  webhooks/stripe.php: $db->beginTransaction(); ... $db->commit(); in a try/catch that calls
+  $db->rollback() on failure.
 
-Questions you should be able to answer about your own code:
-  1. What does your middleware return when API_KEY is not set in the environment at all?
-     (undefined === undefined is true — that is a bug if the env var is missing)
-  2. Is the comparison timing-safe? (String equality is not; for an API key check at this
-     scale it is probably acceptable, but you should make the decision consciously)
-  3. Where does API_KEY get loaded — dotenv in app.js, or assumed to be in the environment?
+Questions you should be able to answer:
+  1. What happens if the INSERT succeeds but the UPDATE fails — does your catch block
+     actually call rollback, or does it just log and return 200?
+     (Returning 200 on a partial failure tells Stripe the event was handled — it will not retry.)
+  2. Is the PDO connection set to throw exceptions (ERRMODE_EXCEPTION)?
+     If not, a failed query returns false instead of throwing, and your try/catch never fires.
 ```
 
-**What you do:** Create `middleware/requireApiKey.js`. The mentor flagged two real issues
-(missing env var behavior, timing safety). You decide: add an explicit startup check that
-throws if `API_KEY` is not set, and accept plain string comparison for now (document the
-decision in a comment). Write the three middleware unit tests. Back to building.
+**What you do:** Add transaction methods to `lib/db.php`. The mentor flagged a critical
+point — returning 200 on a partial failure is a silent data corruption bug. Make sure the
+catch block calls `rollback()` and returns 500, not 200. Stripe will retry on 5xx.
 
 ---
 
 ## Step 4 — STUCK: diagnostic-engineer (when something breaks)
 
-Task 1 is nearly done. Tests pass locally. You try `curl` with the correct key and get a 401
-anyway. You have been staring at it for 20 minutes and cannot see why.
+Task 2 is done locally. You test with the Stripe CLI and the endpoint returns 400 on every
+event — even valid ones. Signature verification is failing but you cannot see why.
 
 **What you type:**
 ```
-Use diagnostic-engineer. Symptom: GET /api/status returns 401 even when the correct API key
-is sent in the Authorization header. Smaller keys work. Repo ~/Projects/myapp, branch
-api-status-auth. Tried: console.log in the middleware confirms the header is being read;
-compared the key in the log to the env var — they look identical. The middleware is mounted
-via router.use(requireApiKey) in routes/api.js. I want the trace, not a guess.
+Use diagnostic-engineer. Symptom: Stripe webhook endpoint returns 400 on all events including
+valid test events from the Stripe CLI. Repo ~/Projects/myapp, branch stripe-webhooks.
+The error is "No signatures found matching the expected signature for payload" from
+Stripe\Exception\SignatureVerificationException. Tried: confirmed STRIPE_WEBHOOK_SECRET
+matches the secret shown in the Stripe CLI. The raw body is read with file_get_contents('php://input').
+I want the trace, not a guess.
 ```
 
 **What you get back:**
 ```
-SYSTEM MAP (upload path):
-  app.js:12          express.json() middleware
-  app.js:18          router mounted at /api → routes/api.js
-  routes/api.js:3    requireApiKey middleware (routes/api.js:3 imports middleware/requireApiKey.js)
-  middleware/requireApiKey.js:7   header read: req.headers['authorization']
-  middleware/requireApiKey.js:9   comparison: header === process.env.API_KEY
+SYSTEM MAP (request path):
+  .htaccess / router        → routes POST /webhook/stripe to webhooks/stripe.php
+  webhooks/stripe.php:8     → $payload = file_get_contents('php://input')
+  webhooks/stripe.php:12    → $event = \Stripe\Webhook::constructEvent($payload, $sigHeader, $secret)
 
 TRACE:
 
-  Divergence point: middleware/requireApiKey.js:9
+  Divergence point: the payload reaching constructEvent() does not match what Stripe signed.
 
-  You said "they look identical" but console.log cannot show whitespace or encoding
-  differences. The comparison is a plain string equality check.
+  CONFIRMED: framework or middleware consumed php://input before your code reads it.
+  php://input is a stream — it can only be read once per request. If your router, an
+  authentication middleware, or any code earlier in the stack calls json_decode(file_get_contents
+  ('php://input')) or reads $_POST before your webhook handler runs, the stream is empty by
+  the time your handler reads it. constructEvent() then receives an empty string, which never
+  matches the signature.
 
-  SUSPECTED (HIGH): trailing newline in API_KEY from the .env file.
-  dotenv strips trailing newlines on most values, but if API_KEY was set directly in the
-  shell environment (export API_KEY="abc123\n") or in a .env file with Windows CRLF line
-  endings, the value includes \r or \n. The key you send in the header does not.
-  Observation that would CONFIRM this: add console.log(JSON.stringify(process.env.API_KEY))
-  — if it shows \r or \n inside the quotes, this is the cause.
+  Observation that confirms this: add error_log(strlen($payload)) immediately after line 8.
+  If it logs 0, the stream was already consumed upstream.
 
-  SUSPECTED (MEDIUM): Authorization header includes the "Bearer " prefix.
-  If the .env value is the raw key (abc123) but curl sends "Bearer abc123", the comparison
-  fails. Check: console.log(JSON.stringify(req.headers['authorization'])) to see the
-  exact string received.
+  SUSPECTED (MEDIUM): a middleware is calling json_decode(file_get_contents('php://input'))
+  on every request for API endpoints. Webhook endpoints need to bypass this or read the body
+  before the middleware does.
 
-  RULED OUT: the middleware not being mounted — you confirmed the header is read, so the
-  middleware is running.
-  RULED OUT: route path mismatch — same reason.
+  RULED OUT: wrong webhook secret — the CLI shows the exact secret to use; a secret mismatch
+  produces a different error ("timestamp outside the tolerance zone" or a hash mismatch with
+  a non-empty payload, not "no signatures found").
 
-BLAST RADIUS: the same comparison flaw would affect any other protected route added later.
+BLAST RADIUS: any future webhook endpoint (from any provider) will hit this same problem
+if the middleware pattern is not addressed.
 
-HOW I FOUND IT: the only way a visually identical string comparison fails is an invisible
-character or a format mismatch. Whitespace and prefix are the two most common causes.
+HOW I FOUND IT: "no signatures found" with a non-empty secret means the payload is empty or
+whitespace. The only common cause in PHP is a consumed input stream.
 ```
 
-**What you do:** Run `console.log(JSON.stringify(process.env.API_KEY))`. It shows `"abc123\r"` —
-CRLF in the `.env` file. Fix: add `.trim()` to the env var read in the middleware.
-Tests pass. Curl with the correct key returns 200.
+**What you do:** Check — `strlen($payload)` logs 0. Your JSON middleware runs on all routes.
+Fix: move the webhook route registration above the JSON middleware, or add an early-exit in
+the middleware that skips `php://input` consumption for the webhook path. Tests pass.
 
 ---
 
-## Step 5 — STANDUP: tech-lead (mid-flight check-in)
+## Step 5 — STANDUP: tech-lead (mid-flight check)
 
-Task 1 is done and merged. You've been working on task 2 for a while and also started adding
-rate limiting "while you were in there."
+Tasks 1 and 2 are merged. You are on task 3 (harden and deploy) and realize the payments
+table does not exist on the production server — only in your local schema. You also notice
+the orders table is missing the `stripe_payment_intent_id` column on production.
 
 **What you type:**
 ```
-Use tech-lead, standup mode. Plan: the api-status plan from step 1 (tasks: 1. auth middleware,
-2. health payload, 3. docs/harden). Task 1 merged yesterday. Since then: finished the health
-payload (task 2), started adding per-IP rate limiting using express-rate-limit because it
-seemed like a good time. That work is in progress in the same branch. Am I on track?
+Use tech-lead, standup mode. Plan: Stripe webhook plan, tasks 1-3. Tasks 1 and 2 merged.
+On task 3: harden and deploy. Hit a blocker — payments table and orders.stripe_payment_intent_id
+column do not exist on the production server (projects, 173.255.195.153). No migration system
+in this project. Am I on track, and how do I handle the schema?
 ```
 
 **What you get back:**
 ```
-CALL: RABBIT-HOLE
+CALL: BLOCKED
 
-EVIDENCE: task 2 (health payload) is done — that is on track. Rate limiting was explicitly
-placed in OUT OF SCOPE in the plan. It is not in any task's definition of done. Adding it
-now means two things are in flight on the same branch: the completed task 2 changes and an
-uncommitted, unscoped feature.
+EVIDENCE: the code is ready to deploy but the schema it depends on does not exist in
+production. git pull will put the code live; the first webhook will then throw a DB error.
+This is a real blocker, not a process question.
 
-NEXT ACTION: commit and push what belongs to task 2 (the health payload), then stop.
-Open a separate branch for rate limiting. Either add it to the plan as task 4 (with a DoD
-and a gate) or move it to PARKED until the current plan is closed.
+NEXT ACTION: before deploying, SSH into projects and run the schema changes manually, then
+confirm they exist before running git pull.
 
-PARKED: rate limiting (express-rate-limit, per-IP) — good idea, not in scope for this plan.
-        Add as task 4 after task 3 is done, or open a new plan.
+SQL to run on the server:
+  (you should write and confirm this — the agent does not write your migrations)
+  CREATE TABLE payments (...) and ALTER TABLE orders ADD COLUMN stripe_payment_intent_id ...
+  Run: DESCRIBE payments; DESCRIBE orders; to confirm before deploying.
+
+ROUTED: no migration system is a project-level gap this plan should not solve — but note it.
+  If this project grows, a migration system (Phinx, Flyway, or a simple numbered SQL file
+  convention) prevents this exact situation next time. Add to PARKED.
+
+PARKED: migration system for future schema changes
 ```
 
-**What you do:** Stash the rate-limiting work, commit the health payload on its own,
-merge task 2. Create a separate branch for rate limiting later.
+**What you do:** SSH into projects server, run the schema changes, confirm with `DESCRIBE`.
+Then deploy.
 
 ---
 
-## Step 6 — GATE: code-reviewer
+## Step 6 — DEPLOY: the actual deploy
 
-Task 2 merged. Task 3 (docs + harden) is done. Time to gate the full feature before calling
-it complete. Run code-reviewer first.
+No agent for this — this is you executing the plan.
+
+```bash
+# On your machine:
+ssh projects
+
+# On the server:
+cd /var/www/myapp
+git pull origin main
+
+# Confirm the new file is there:
+ls webhooks/stripe.php
+
+# Tail the log during a test:
+tail -f /var/log/myapp/error.log
+```
+
+Then trigger a test event from the Stripe dashboard or CLI pointed at the live URL.
+Confirm the payments row appears in MySQL and the order status updates to 'paid'.
+
+---
+
+## Step 7 — GATE: code-reviewer
+
+Feature works on the server. Time to formally gate task 3 before calling the feature done.
 
 **What you type:**
 ```
-Use code-reviewer. Review branch api-status-auth vs main in ~/Projects/myapp.
-Changed files: middleware/requireApiKey.js, routes/api.js, tests/middleware/requireApiKey.test.js,
-tests/api/status.test.js, .env.example, README.md.
-DoD from the plan: key in env var, 401 without/wrong key, 200 with correct key, shape test
-for payload, no key in logs, teammate can set up from README.
+Use code-reviewer. Review branch stripe-webhooks vs main in ~/Projects/myapp.
+Changed files: webhooks/stripe.php, lib/db.php, .env.example, docs/deploy.md.
+DoD: endpoint verified and live on projects server, signature failures logged but not
+exposed, deployment steps documented, no secrets in any file.
 ```
 
 **What you get back (example):**
@@ -248,75 +292,74 @@ VERDICT: APPROVE-WITH-NOTES
 MUST-FIX: none
 
 SHOULD-FIX:
-  middleware/requireApiKey.js:14 — the error response body is {error: "Unauthorized"} but
-  the status code comment says 401. If a caller checks the body to distinguish "missing key"
-  from "wrong key", they cannot. Consider {error: "missing_api_key"} vs {error: "invalid_api_key"}.
-  Not a correctness bug today, but will matter the first time someone debugs a 401 in production.
+  webhooks/stripe.php:34 — the catch block for SignatureVerificationException logs the
+  exception message, which includes the received signature hash. That hash is not a secret,
+  but logging it in full means your log files contain Stripe header values. Trim to just
+  the exception class and a fixed string: "Stripe signature verification failed".
 
-  tests/api/status.test.js:22 — the payload shape test asserts heapUsed exists but does not
-  assert it is a number. A future refactor that returns heapUsed as a string would pass this
-  test. Change to: expect(typeof res.body.heapUsed).toBe('number')
+  lib/db.php:41 — rollback() does not check whether a transaction is active before calling
+  PDO::rollBack(). If rollback() is called outside a transaction (e.g. in a catch that runs
+  when no transaction was started), PDO throws an exception. Wrap with
+  if ($this->pdo->inTransaction()) before calling rollBack().
 
 NICE:
-  .env.example — the comment explains what the key is but not the expected format (length,
-  characters). A one-liner like "# 32+ character random string, e.g. openssl rand -hex 16"
-  helps whoever sets this up next.
+  .env.example — STRIPE_WEBHOOK_SECRET is documented. Consider adding a comment noting
+  this secret is different from STRIPE_SECRET_KEY — they come from different places in
+  the Stripe dashboard and are commonly confused.
 
-INFERRED (not observed — run before calling done):
-  The .trim() fix on process.env.API_KEY was confirmed working locally. Verify it also works
-  when the env var is set via the deployment environment (not .env file) to confirm .trim()
-  does not strip characters it should not.
+INFERRED: the middleware bypass (moving webhook route above JSON middleware) — confirmed
+working via your Stripe CLI test but should be verified on the production server with a
+live test event, not assumed identical to local behavior.
 ```
 
-**What you do:** Fix the two SHOULD-FIX items (they're quick). The NICE item too — one line.
-Now run security-reviewer. The task touches auth and input handling — the trigger rule applies.
+**What you do:** Fix both SHOULD-FIX items (10 minutes). Run a final live test event. Done.
 
 ---
 
-## Step 7 — GATE: security-reviewer
+## Step 8 — GATE: security-reviewer
+
+Task touches input handling (raw POST body from an external service) and money. Trigger rule applies.
 
 **What you type:**
 ```
-Use security-reviewer. Same branch api-status-auth vs main in ~/Projects/myapp, same files.
-This change adds API key auth: reads Authorization header, compares to env var, returns health
-data. Auth and input handling are the surfaces.
+Use security-reviewer. Branch stripe-webhooks vs main in ~/Projects/myapp, same files.
+This endpoint receives raw POST bodies from Stripe, verifies the signature, and writes
+payment records to MySQL. Input handling and money are the surfaces.
 ```
 
 **What you get back (example):**
 ```
-VERDICT: PASS-WITH-NOTES
+VERDICT: PASS
 
-BLOCK: none
+Notes:
+  Signature verification using constructEvent() with the raw body is the correct pattern —
+  confirmed. Stripe's library handles timing-safe comparison internally.
 
-NOTES:
-  middleware/requireApiKey.js — string equality comparison (===) is not timing-safe.
-  A timing attack on a local API key check at this traffic level is a theoretical risk,
-  not a practical one. Acceptable for current scale. If this ever gates access to sensitive
-  data or runs at high volume, replace with crypto.timingSafeEqual(). Document the decision.
+  webhooks/stripe.php: the payment intent ID from the event is inserted directly into the
+  prepared statement — confirmed parameterized, not interpolated. No SQL injection surface.
 
-  routes/api.js:31 — process.memoryUsage() and process.uptime() expose runtime internals.
-  Acceptable for an operator endpoint behind auth. Ensure this route is never accidentally
-  made public (no auth middleware removal without a security pass).
+  Idempotency via UNIQUE KEY on payment_intent_id: confirmed. Duplicate events are a
+  guaranteed reality with Stripe; this handles them correctly.
 
-  No secrets in logs: confirmed by grep. No key echoed in responses: confirmed.
-  Error responses do not leak which part of validation failed: confirmed (both missing and
-  wrong key return 401 with the same body).
+  Returning 500 (not 200) on DB failure: confirmed. Stripe will retry — correct behavior.
+
+  No amount from the Stripe event is trusted for pricing — the amount is recorded for
+  the record only; order fulfillment keys off the event type and the intent ID, not a
+  client-supplied amount. Correct.
 ```
 
-**What you do:** Add a comment in the middleware about the timing-safe decision.
-PASS means the feature can ship.
+Both gates pass. Run the done-check.
 
 ---
 
-## Step 8 — DONE-CHECK: tech-lead
-
-Both gates passed. Run the done-check before merging.
+## Step 9 — DONE-CHECK: tech-lead
 
 **What you type:**
 ```
-Use tech-lead, done-check mode. Task 3 of the api-status plan (docs + harden).
-Branch api-status-auth. Tests pass locally. code-reviewer APPROVE-WITH-NOTES (notes addressed).
-security-reviewer PASS-WITH-NOTES (notes addressed with comment). Check it against the DoD.
+Use tech-lead, done-check mode. All three tasks of the Stripe webhook plan. Branch merged,
+endpoint live on projects server (173.255.195.153). code-reviewer APPROVE-WITH-NOTES (both
+notes addressed). security-reviewer PASS. Live test event confirmed 200 response, payments
+row created, order status updated to paid.
 ```
 
 **What you get back:**
@@ -324,20 +367,20 @@ security-reviewer PASS-WITH-NOTES (notes addressed with comment). Check it again
 VERDICT: DONE
 
 DOD LINE-BY-LINE:
-  ✓ curl with correct key returns 200 + JSON payload — confirmed by passing integration test
-  ✓ curl without key returns 401 — confirmed by test
-  ✓ curl with wrong key returns 401 — confirmed by test
-  ✓ response includes uptime, heapUsed, rss, version — confirmed by shape test
-  ✓ API_KEY in .env.example with comment — present
-  ✓ endpoint documented in README — present
-  ✓ no key appears in any log output — confirmed by security-reviewer grep
-  ✓ gates passed — code-reviewer APPROVE-WITH-NOTES (notes addressed),
-                   security-reviewer PASS-WITH-NOTES (notes addressed)
+  ✓ Valid Stripe event returns 200 — confirmed by live test on projects server
+  ✓ Invalid signature returns 400 — confirmed by Stripe CLI test
+  ✓ Payment recorded in payments table — confirmed by live test query
+  ✓ Order status updated to paid atomically — confirmed; transaction rollback tested
+  ✓ Duplicate event does not create duplicate payment — UNIQUE KEY confirmed in schema
+  ✓ Signature failures logged but not exposed to caller — confirmed after code-reviewer fix
+  ✓ STRIPE_WEBHOOK_SECRET in .env.example with instructions — confirmed
+  ✓ Deployment steps documented — confirmed in docs/deploy.md
+  ✓ Gates passed — code-reviewer APPROVE-WITH-NOTES (addressed), security-reviewer PASS
 
-REMAINING: nothing. Merge when ready.
+PARKED (from standup): migration system for future schema changes
+
+REMAINING: nothing. Feature is done.
 ```
-
-**What you do:** Merge the branch. Feature is done.
 
 ---
 
@@ -345,21 +388,39 @@ REMAINING: nothing. Merge when ready.
 
 ```
 tech-lead (breakdown)
-  → you build the route stub (confirm it answers)
-    → senior-dev-mentor (middleware location question)
-      → you build the middleware + tests
-        → diagnostic-engineer (401 bug — CRLF in env var)
-          → you fix .trim(), tests pass
-  → tech-lead (standup — catches rate-limiting rabbit hole)
-    → you commit task 2, stash rate limiting
+  → build signature verification stub
+    → senior-dev-mentor (transaction design — adds methods to lib/db.php)
+      → build DB writes with transaction
+        → diagnostic-engineer (400 bug — consumed php://input stream)
+          → fix middleware ordering
+  → tech-lead (standup — schema missing on prod, routes to manual SQL before deploy)
+    → run schema on server, git pull, live test
   → code-reviewer (APPROVE-WITH-NOTES, two fixes)
-  → security-reviewer (PASS-WITH-NOTES, one comment added)
+  → security-reviewer (PASS)
 → tech-lead (done-check — DONE)
-→ merge
 ```
 
-Total agent invocations: 6. Every one had a specific trigger. None were optional for a
-task touching auth.
+---
+
+## Your deploy checklist (for any project)
+
+Before every deploy to a production server:
+
+```
+1. Schema changes?   SSH in and run them manually BEFORE git pull
+2. Env vars?         Confirm any new .env keys exist on the server
+3. git pull          cd /var/www/<project> && git pull origin main
+4. Verify            Tail the error log, trigger a test action, confirm it works
+5. Gate first        Never deploy without code-reviewer (and security-reviewer if applicable)
+```
+
+Servers:
+```
+ssh development   # 104.237.131.5   — dev/testing
+ssh projects      # 173.255.195.153 — production projects
+ssh dhfc          # 45.79.71.196    — DHFC deploy
+ssh personal      # 45.33.119.137   — personal projects
+```
 
 ---
 
@@ -367,10 +428,11 @@ task touching auth.
 
 | Situation | Skip? |
 |---|---|
-| Tiny change (typo, copy update, config value) | Skip senior-dev-mentor; still gate with code-reviewer |
-| No auth/input/secrets/money | Skip security-reviewer |
+| Tiny change (copy, config value, CSS tweak) | Skip senior-dev-mentor; still gate with code-reviewer |
+| No auth/input/secrets/money/Stripe | Skip security-reviewer |
 | No design fork mid-build | Skip senior-dev-mentor |
 | Nothing broken | Skip diagnostic-engineer |
 | Always | Never skip tech-lead done-check; never skip code-reviewer |
 
-The gates are not optional. Everything else is triggered by the situation.
+The gates (code-reviewer, security-reviewer when triggered) are not optional.
+Everything else fires on the situation.
