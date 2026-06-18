@@ -1,0 +1,4 @@
+#!/bin/sh
+# dev-team is shared with the team: every commit publishes automatically.
+# New clone? Run once: git config core.hooksPath .githooks
+git push origin HEAD --quiet 2>/dev/null && echo "[post-commit] pushed to origin" || echo "[post-commit] push FAILED (offline? auth?) - run: git push"

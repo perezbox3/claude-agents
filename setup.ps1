@@ -8,12 +8,12 @@ Write-Host "=== Claude Dev Environment Setup ===" -ForegroundColor Cyan
 Write-Host "Repo: $repoRoot`n"
 
 # ── 1. PowerShell execution policy ────────────────────────────────────────────
-Write-Host "[1/7] Setting PowerShell execution policy..." -ForegroundColor Yellow
+Write-Host "[1/8] Setting PowerShell execution policy..." -ForegroundColor Yellow
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
 Write-Host "      ExecutionPolicy = RemoteSigned (CurrentUser)" -ForegroundColor Green
 
 # ── 2. Install tools via winget ───────────────────────────────────────────────
-Write-Host "`n[2/7] Installing dependencies via winget..." -ForegroundColor Yellow
+Write-Host "`n[2/8] Installing dependencies via winget..." -ForegroundColor Yellow
 $packages = @(
     @{ Id = "Git.Git";                  Name = "Git" },
     @{ Id = "OpenJS.NodeJS.LTS";        Name = "Node.js LTS" },
@@ -44,13 +44,13 @@ if ($npmCheck) {
 }
 
 # ── 3. Git global config ──────────────────────────────────────────────────────
-Write-Host "`n[3/7] Configuring git..." -ForegroundColor Yellow
+Write-Host "`n[3/8] Configuring git..." -ForegroundColor Yellow
 git config --global user.name "perezbox3"
 git config --global user.email "perezbox3@gmail.com"
 Write-Host "      user.name = perezbox3 | user.email = perezbox3@gmail.com" -ForegroundColor Green
 
 # ── 4. SSH config ─────────────────────────────────────────────────────────────
-Write-Host "`n[4/7] Setting up SSH config..." -ForegroundColor Yellow
+Write-Host "`n[4/8] Setting up SSH config..." -ForegroundColor Yellow
 $sshDir = "$env:USERPROFILE\.ssh"
 New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
 $sshConfigSrc = "$repoRoot\config\ssh_config"
@@ -66,7 +66,7 @@ if (Test-Path $sshConfigDst) {
 Write-Host "      !! Copy your SSH key to $sshDir\id_ed25519 (never stored in this repo)" -ForegroundColor Red
 
 # ── 5. PowerShell profile ─────────────────────────────────────────────────────
-Write-Host "`n[5/7] Installing PowerShell profile..." -ForegroundColor Yellow
+Write-Host "`n[5/8] Installing PowerShell profile..." -ForegroundColor Yellow
 $profileDir = Split-Path $PROFILE -Parent
 New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
 $profileSrc = "$repoRoot\config\powershell_profile.ps1"
@@ -81,7 +81,7 @@ if (Test-Path $PROFILE) {
 }
 
 # ── 6. Claude Code settings ───────────────────────────────────────────────────
-Write-Host "`n[6/7] Installing Claude Code settings..." -ForegroundColor Yellow
+Write-Host "`n[6/8] Installing Claude Code settings..." -ForegroundColor Yellow
 $claudeDir = "$env:USERPROFILE\.claude"
 New-Item -ItemType Directory -Force -Path $claudeDir | Out-Null
 $settingsSrc = "$repoRoot\config\claude_settings.json"
@@ -96,8 +96,13 @@ if (Test-Path $settingsDst) {
 }
 
 # ── 7. Install Claude agents ──────────────────────────────────────────────────
-Write-Host "`n[7/7] Installing Claude agents..." -ForegroundColor Yellow
+Write-Host "`n[7/8] Installing Claude agents (core-team + enterprise)..." -ForegroundColor Yellow
 & "$repoRoot\install.ps1"
+
+# ── 8. Wire up post-commit auto-push hook ─────────────────────────────────────
+Write-Host "`n[8/8] Wiring post-commit auto-push hook..." -ForegroundColor Yellow
+git -C $repoRoot config core.hooksPath .githooks
+Write-Host "      core.hooksPath = .githooks (commits will auto-push to origin)" -ForegroundColor Green
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 Write-Host "`n=== Setup complete ===" -ForegroundColor Cyan
