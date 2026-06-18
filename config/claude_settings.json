@@ -1,0 +1,31 @@
+{
+  "autoUpdatesChannel": "latest",
+  "theme": "dark",
+  "permissions": {
+    "allow": [
+      "Bash(ssh *)",
+      "Bash(git add *)",
+      "Bash(git commit -m *)",
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(npm create *)",
+      "Bash(npx vite *)",
+      "PowerShell(git *)",
+      "PowerShell(npm *)",
+      "PowerShell(pip *)",
+      "PowerShell(gh repo *)",
+      "PowerShell(gh auth *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(New-Item *)",
+      "PowerShell(Test-NetConnection *)",
+      "PowerShell(Invoke-RestMethod *)",
+      "PowerShell(ssh *)",
+      "PowerShell(ssh-add *)",
+      "PowerShell(claude mcp *)",
+      "PowerShell(& \"$env:USERPROFILE\\claude-agents\\install.ps1\")",
+      "PowerShell(. $PROFILE)",
+      "PowerShell(& $PROFILE)"
+    ]
+  }
+}

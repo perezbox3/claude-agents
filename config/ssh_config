@@ -1,0 +1,19 @@
+Host *
+    ServerAliveInterval 30
+    ServerAliveCountMax 6
+
+Host development
+    HostName 104.237.131.5
+    User perezbox3
+
+Host dhfc
+    HostName 45.79.71.196
+    User deploy
+
+Host projects
+    HostName 173.255.195.153
+    User perezbox3
+
+Host personal
+    HostName 45.33.119.137
+    User perezbox3
