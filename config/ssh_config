@@ -1,15 +1,6 @@
 Host *
     ServerAliveInterval 30
     ServerAliveCountMax 6
-    # Connection reuse: repeated ssh/scp/sftp calls to the same host within
-    # 10 minutes share one TCP connection instead of opening a new one each
-    # time. Several of our servers (e.g. `development`) fail2ban-block a
-    # source IP after too many separate connections in a short window --
-    # this prevents tripping that at the tooling level rather than relying
-    # on manually batching commands.
-    ControlMaster auto
-    ControlPath ~/.ssh/cm-%r@%h:%p
-    ControlPersist 10m
 
 Host development
     HostName 104.237.131.5

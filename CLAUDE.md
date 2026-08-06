@@ -158,11 +158,15 @@ ssh personal      # 45.33.119.137   (perezbox3)
   (`base64 -d`) — the only method that's held up reliably. For multiple files,
   use `sftp -b <batchfile>` (one connection) rather than embedding several files'
   content in one command string (hits Windows' argument-length limit fast).
-- **SSH connection reuse is configured in `config/ssh_config`** (`ControlMaster`/
-  `ControlPersist`) specifically to prevent rate-limit lockouts on servers like
-  `development` from too many separate connections in a short window. Still
-  batch related remote commands into one `ssh host "cmd1 && cmd2"` call where
-  practical rather than relying on multiplexing alone.
+- **Don't add `ControlMaster`/`ControlPersist` to `ssh_config` on Windows —
+  it doesn't work.** Tried it 2026-08-06: it broke SSH entirely
+  (`getsockname failed: Not a socket` on every connection, not just a
+  multiplexing failure). Win32-OpenSSH's ControlMaster backgrounding depends
+  on Unix `fork()` semantics Windows doesn't have. There is no config-level
+  fix for the rate-limit issue on this platform — the only real mitigation is
+  discipline: batch related remote commands into one `ssh host "cmd1 && cmd2"`
+  call, and never fire multiple separate SSH connections to the same
+  rate-limited host in one turn, sequential or parallel.
 
 ---
 
