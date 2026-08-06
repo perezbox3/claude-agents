@@ -144,6 +144,28 @@ ssh personal      # 45.33.119.137   (perezbox3)
 
 ---
 
+## Claude Code on Windows — known gotchas
+
+- **Use PowerShell for SSH/SCP/SFTP, not Bash.** Git Bash's ssh doesn't share the
+  Windows OpenSSH agent/credentials — commands that work in PowerShell can fail
+  with "Permission denied" in Bash using the exact same key. If SSH fails, retry
+  in the other shell before assuming a key/auth problem.
+- **Text piped through PowerShell into a native process can pick up a UTF-8 BOM**,
+  even from a verified BOM-free source, even after `$OutputEncoding` fixes. This
+  silently corrupts scripts, commit messages, and any file edited locally then
+  pushed to a Linux server (a real one-line change can show up as the whole file
+  changed in `git diff`). Fix: base64-encode locally, decode remotely
+  (`base64 -d`) — the only method that's held up reliably. For multiple files,
+  use `sftp -b <batchfile>` (one connection) rather than embedding several files'
+  content in one command string (hits Windows' argument-length limit fast).
+- **SSH connection reuse is configured in `config/ssh_config`** (`ControlMaster`/
+  `ControlPersist`) specifically to prevent rate-limit lockouts on servers like
+  `development` from too many separate connections in a short window. Still
+  batch related remote commands into one `ssh host "cmd1 && cmd2"` call where
+  practical rather than relying on multiplexing alone.
+
+---
+
 ## Keeping in sync
 
 - **Commit = published.** The `.githooks/post-commit` hook pushes every commit automatically.
