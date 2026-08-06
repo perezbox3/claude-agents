@@ -5,7 +5,7 @@ without you having to re-explain it each time.
 
 **Example invocation opener:**
 ```
-Use tech-lead. Context: ~/claude-agents/config/project-context.md. Goal: ...
+Use tech-lead. Context: ~/Projects/claude-agents/config/project-context.md. Goal: ...
 ```
 
 ---

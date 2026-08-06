@@ -84,8 +84,8 @@ claude-agents/
 
 ### Quick start
 ```powershell
-git clone https://github.com/perezbox3/claude-agents.git ~/claude-agents
-cd ~/claude-agents
+git clone https://github.com/perezbox3/claude-agents.git ~/Projects/claude-agents
+cd ~/Projects/claude-agents
 .\setup.ps1
 ```
 
@@ -156,7 +156,7 @@ ssh personal      # 45.33.119.137   (perezbox3)
 ## Updating agents on an existing machine
 
 ```powershell
-cd ~/claude-agents
+cd ~/Projects/claude-agents
 git pull
 .\install.ps1
 ```
@@ -168,9 +168,9 @@ git pull
 Copy agent files into the product repo's `.claude/agents/` so they travel with the code:
 ```powershell
 # From the product repo root:
-Copy-Item ~/claude-agents/core-team/*.md .claude/agents/ -Force
+Copy-Item ~/Projects/claude-agents/core-team/*.md .claude/agents/ -Force
 # Add enterprise seats as needed
-Copy-Item ~/claude-agents/enterprise/architect-reviewer.md .claude/agents/ -Force
+Copy-Item ~/Projects/claude-agents/enterprise/architect-reviewer.md .claude/agents/ -Force
 ```
 
 Commit `.claude/agents/` — teammates and cloud sessions pick them up automatically.

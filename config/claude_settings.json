@@ -23,7 +23,7 @@
       "PowerShell(ssh *)",
       "PowerShell(ssh-add *)",
       "PowerShell(claude mcp *)",
-      "PowerShell(& \"$env:USERPROFILE\\claude-agents\\install.ps1\")",
+      "PowerShell(& \"$env:USERPROFILE\\Projects\\claude-agents\\install.ps1\")",
       "PowerShell(. $PROFILE)",
       "PowerShell(& $PROFILE)"
     ]
